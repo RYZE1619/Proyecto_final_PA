@@ -7,6 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 class User extends Model
 {
     protected $table = 'usuarios';
-    public $timestamps = false;
-    protected $hidden = ['password'];
+    public $timestamps = true;
+    protected $hidden = ['contrasena'];
+    protected $casts = [
+        'sesion_activa' => 'boolean',
+    ];
 }

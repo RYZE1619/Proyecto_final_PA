@@ -3,74 +3,123 @@
 namespace App\Presentation\Repositories;
 
 use App\Controllers\UsersController;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Exception;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 class UserRepository
 {
-
-    public function all(Request $request, Response $response, $args): Response
+    private function jsonResponse(Response $response, array $data, int $status = 200): Response
     {
-        $controller = new UsersController();
-        $rows = $controller->get_users();
-        $response->getBody()->write($rows->toJson());
-        return $response->withHeader("Content-Type", "application/json");
+        $response->getBody()->write(json_encode($data));
+        return $response
+            ->withStatus($status)
+            ->withHeader('Content-Type', 'application/json');
+    }
+
+    private function extractToken(Request $request, ?array $body = null): string
+    {
+        $authHeader = $request->getHeaderLine('Authorization');
+        if (str_starts_with($authHeader, 'Bearer ')) {
+            return trim(substr($authHeader, 7));
+        }
+
+        if (!empty($authHeader)) {
+            return trim($authHeader);
+        }
+
+        if ($body && !empty($body['token'])) {
+            return trim((string) $body['token']);
+        }
+
+        return '';
     }
 
     public function login(Request $request, Response $response, $args): Response
     {
         try {
-            $body = $request->getBody()->getContents();
-            $data = json_decode($body, true);
+            $data = json_decode($request->getBody()->getContents(), true) ?? [];
+            $identificador = trim((string) ($data['usuario'] ?? $data['correo'] ?? ''));
+            $contrasena = (string) ($data['contrasena'] ?? '');
+
+            if ($identificador === '' || $contrasena === '') {
+                return $this->jsonResponse($response, [
+                    'ok' => false,
+                    'mensaje' => 'Debe ingresar usuario o correo y contraseña'
+                ], 400);
+            }
+
             $controller = new UsersController();
-            $row = $controller->find_user($data['username'], $data['password']);
-            $response->getBody()->write($row->toJson());
-            return $response->withHeader("Content-Type", "application/json");
-        } catch (ModelNotFoundException $ex) {
-            return $response->withStatus(406);
+            $user = $controller->login($identificador, $contrasena);
+
+            return $this->jsonResponse($response, [
+                'ok' => true,
+                'mensaje' => 'Inicio de sesión exitoso',
+                'token' => $user->token,
+                'usuario' => $user
+            ], 200);
+        } catch (Exception $ex) {
+            $status = in_array($ex->getCode(), [401, 403], true) ? $ex->getCode() : 400;
+            return $this->jsonResponse($response, [
+                'ok' => false,
+                'mensaje' => $ex->getMessage()
+            ], $status);
         }
     }
 
-    public function create(Request $request, Response $response, $args): Response
+    public function logout(Request $request, Response $response, $args): Response
     {
         try {
-            $body = $request->getBody()->getContents();
-            $data = json_decode($body, true);
+            $data = json_decode($request->getBody()->getContents(), true);
+            $token = $this->extractToken($request, is_array($data) ? $data : null);
+
+            if ($token === '') {
+                return $this->jsonResponse($response, [
+                    'ok' => false,
+                    'mensaje' => 'Token requerido'
+                ], 401);
+            }
+
             $controller = new UsersController();
-            $row = $controller->create($data);
-            $response->getBody()->write($row->toJson());
-            return $response->withHeader("Content-Type", "application/json");
-        } catch (ModelNotFoundException $ex) {
-            return $response->withStatus(406);
+            $controller->logout($token);
+
+            return $this->jsonResponse($response, [
+                'ok' => true,
+                'mensaje' => 'Sesión cerrada correctamente'
+            ], 200);
+        } catch (Exception $ex) {
+            return $this->jsonResponse($response, [
+                'ok' => false,
+                'mensaje' => $ex->getMessage()
+            ], 401);
         }
     }
 
-    public function update(Request $request, Response $response, $args): Response
+    public function validarSesion(Request $request, Response $response, $args): Response
     {
         try {
-            $id = $args['id'];
-            $body = $request->getBody()->getContents();
-            $data = json_decode($body, true);
-            $controller = new UsersController();
-            $row = $controller->update($id, $data);
-            $response->getBody()->write($row->toJson());
-            return $response->withHeader("Content-Type", "application/json");
-        } catch (ModelNotFoundException $ex) {
-            return $response->withStatus(404);
-        }
-    }
+            $token = $this->extractToken($request);
 
-    public function delete(Request $request, Response $response, $args): Response
-    {
-        try {
-            $id = $args['id'];
+            if ($token === '') {
+                return $this->jsonResponse($response, [
+                    'ok' => false,
+                    'mensaje' => 'Token no proporcionado'
+                ], 401);
+            }
+
             $controller = new UsersController();
-            $row = $controller->delete($id);
-            $response->getBody()->write($row->toJson());
-            return $response->withHeader("Content-Type", "application/json");
-        } catch (ModelNotFoundException $ex) {
-            return $response->withStatus(404);
+            $user = $controller->validarSesion($token);
+
+            return $this->jsonResponse($response, [
+                'ok' => true,
+                'mensaje' => 'Sesión activa',
+                'usuario' => $user
+            ], 200);
+        } catch (Exception $ex) {
+            return $this->jsonResponse($response, [
+                'ok' => false,
+                'mensaje' => $ex->getMessage()
+            ], 401);
         }
     }
 }

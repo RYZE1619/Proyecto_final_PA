@@ -4,48 +4,57 @@ namespace App\Controllers;
 
 use App\Models\User;
 use Exception;
-use Illuminate\Database\Eloquent\Collection;
 
 class UsersController
 {
-    function get_users(): Collection
+    public function login(string $identificador, string $contrasena): User
     {
-        return User::all();
-    }
+        $user = User::where(function ($query) use ($identificador) {
+            $query->where('usuario', $identificador)
+                  ->orWhere('correo', $identificador);
+        })->first();
 
-    function find_user(string $username, string $password): User
-    {
-        // $user = User::where("username", $username)
-        //     ->where("password", $password)->get();
-        // if (count($user) == 0) {
-        //     throw new Exception("Usuario no encontrado", 1);
-        // }
-        // return $user[0];
-        return User::where("username", $username)->where("password", $password)->firstOrFail();
-    }
+        if (!$user || $user->contrasena !== $contrasena) {
+            throw new Exception('Credenciales incorrectas', 401);
+        }
 
-    function create(array $data): User
-    {
-        $user = new User();
-        $user->nombre = $data["nombre"];
-        $user->username = $data["username"];
-        $user->password = $data["password"];
+        if ($user->estado !== 'activo') {
+            throw new Exception('El usuario se encuentra inactivo', 403);
+        }
+
+        $user->token = bin2hex(random_bytes(32));
+        $user->sesion_activa = true;
         $user->save();
+
         return $user;
     }
 
-    function update(int $id, array $data):User{
-        $user = User::findOrFail($id);
-        $user->nombre = $data["nombre"];
-        $user->username = $data["username"];
-        $user->password = $data["password"];
+    public function logout(string $token): void
+    {
+        $user = User::where('token', $token)
+            ->where('sesion_activa', true)
+            ->first();
+
+        if (!$user) {
+            throw new Exception('Sesión no válida o ya cerrada', 401);
+        }
+
+        $user->token = null;
+        $user->sesion_activa = false;
         $user->save();
-        return $user;
     }
 
-    function delete(int $id):User{
-        $user = User::findOrFail($id);
-        $user->delete();
+    public function validarSesion(string $token): User
+    {
+        $user = User::where('token', $token)
+            ->where('sesion_activa', true)
+            ->where('estado', 'activo')
+            ->first();
+
+        if (!$user) {
+            throw new Exception('Token inválido o sesión inactiva', 401);
+        }
+
         return $user;
     }
 }
